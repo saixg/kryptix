@@ -9,6 +9,7 @@
     "dev": "node --watch src/server.js",
     "cli": "node src/cli.js",
     "test": "node test/contextManager.test.js",
+    "test:e2e": "node test/e2e.test.js",
     "test-connection": "node scripts/test-connection.js"
   },
   "keywords": [

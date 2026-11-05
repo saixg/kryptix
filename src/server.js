@@ -26,8 +26,13 @@ const contextManager = new ContextManager({
 
 // Configure context manager summarizer function using active provider
 contextManager.setSummarizer(async (olderMessages, currentSummary) => {
-  const provider = getProvider();
-  return await provider.summarizeHistory(olderMessages, currentSummary);
+  try {
+    const provider = getProvider(contextManager.lastUsedProvider);
+    return await provider.summarizeHistory(olderMessages, currentSummary);
+  } catch (err) {
+    console.warn('[Server Summarizer Warning]:', err.message);
+    return currentSummary;
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -76,7 +81,7 @@ app.post('/api/chat', async (req, res) => {
 
   // Verify provider setup
   const providerConfig = getActiveProviderConfig();
-  if (providerConfig.error) {
+  if (providerConfig.error && preferredProvider !== 'demo') {
     return res.status(503).json({
       error: providerConfig.error,
       hint: 'Please create a .env file with your GEMINI_API_KEY or OPENAI_API_KEY.',
@@ -89,6 +94,8 @@ app.post('/api/chat', async (req, res) => {
       personaId: selectedPersona.id,
       strategy: strategy || config.contextStrategy,
     });
+
+    contextManager.lastUsedProvider = preferredProvider;
 
     // 1. Add incoming user message to session memory
     contextManager.addMessage(session.id, 'user', message.trim());
@@ -167,3 +174,4 @@ app.listen(PORT, () => {
   console.log(`📡 Strategy: ${config.contextStrategy} (Max active turns: ${config.maxActiveMessages})`);
   console.log(`======================================================\n`);
 });
+

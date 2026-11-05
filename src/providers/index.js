@@ -1,5 +1,6 @@
 import { GeminiProvider } from './geminiProvider.js';
 import { OpenAIProvider } from './openaiProvider.js';
+import { MockProvider } from './mockProvider.js';
 import { config, getActiveProviderConfig } from '../config.js';
 
 let activeProviderInstance = null;
@@ -7,11 +8,15 @@ let activeProviderInstance = null;
 export function getProvider(preferredProvider) {
   const activeConfig = getActiveProviderConfig();
 
-  if (activeConfig.error) {
+  if (activeConfig.error && preferredProvider !== 'demo') {
     throw new Error(activeConfig.error);
   }
 
   const providerType = preferredProvider || activeConfig.provider;
+
+  if (providerType === 'demo') {
+    return new MockProvider();
+  }
 
   if (providerType === 'gemini') {
     if (!config.geminiApiKey) {
@@ -42,3 +47,4 @@ export function getDefaultProvider() {
   }
   return activeProviderInstance;
 }
+

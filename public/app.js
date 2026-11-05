@@ -265,3 +265,4 @@ DOM.chatForm.addEventListener('submit', async (e) => {
 
 // Initial boot
 checkHealth();
+

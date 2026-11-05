@@ -14,7 +14,7 @@ export const config = {
   
   // Gemini settings
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   
   // OpenAI settings
   openaiApiKey: process.env.OPENAI_API_KEY || '',
@@ -25,11 +25,16 @@ export const config = {
   // 'sliding_window' = only retain the last N messages
   contextStrategy: process.env.CONTEXT_STRATEGY || 'summarize',
   maxActiveMessages: parseInt(process.env.MAX_ACTIVE_MESSAGES || '6', 10),
+  demoMode: process.env.DEMO_MODE === 'true',
 };
 
 export function getActiveProviderConfig() {
   const hasGemini = Boolean(config.geminiApiKey && config.geminiApiKey.trim());
   const hasOpenAI = Boolean(config.openaiApiKey && config.openaiApiKey.trim());
+
+  if (config.demoMode) {
+    return { provider: 'demo', model: 'mock-llm-v1' };
+  }
 
   if (config.defaultProvider === 'openai') {
     if (hasOpenAI) return { provider: 'openai', model: config.openaiModel };
@@ -44,3 +49,4 @@ export function getActiveProviderConfig() {
     error: 'No API key found. Please set GEMINI_API_KEY or OPENAI_API_KEY in your .env file.',
   };
 }
+

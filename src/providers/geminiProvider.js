@@ -4,9 +4,9 @@ export class GeminiProvider {
   /**
    * @param {Object} options
    * @param {string} options.apiKey
-   * @param {string} [options.model='gemini-3.8-flash']
+   * @param {string} [options.model='gemini-3.5-flash-lite']
    */
-  constructor({ apiKey, model = 'gemini-3.8-flash' }) {
+  constructor({ apiKey, model = 'gemini-3.5-flash-lite' }) {
     if (!apiKey) {
       throw new Error('Gemini API key is required. Please set GEMINI_API_KEY in your .env file.');
     }
@@ -16,21 +16,19 @@ export class GeminiProvider {
   }
 
   /**
-   * Format generic messages ({ role: 'user'|'model'|'assistant', content: string })
-   * into Gemini contents schema.
+   * Format message array into clear turn transcript for the Interactions API
    */
-  _formatContents(messages) {
-    return messages.map(msg => {
-      const role = (msg.role === 'assistant' || msg.role === 'model') ? 'model' : 'user';
-      return {
-        role,
-        parts: [{ text: String(msg.content) }],
-      };
-    });
+  _formatInput(messages) {
+    return messages
+      .map(msg => {
+        const speaker = (msg.role === 'assistant' || msg.role === 'model') ? 'Assistant' : 'User';
+        return `${speaker}: ${msg.content}`;
+      })
+      .join('\n\n');
   }
 
   /**
-   * Generate a chat response for multi-turn history.
+   * Generate a chat response for multi-turn history using the Google Gemini Interactions API.
    * 
    * @param {Object} params
    * @param {Array<{ role: string, content: string }>} params.messages
@@ -40,37 +38,58 @@ export class GeminiProvider {
    */
   async generateReply({ messages, systemInstruction, model, temperature = 0.7 }) {
     const targetModel = model || this.defaultModel;
-    const contents = this._formatContents(messages);
+    const input = this._formatInput(messages);
 
-    try {
-      const config = {
-        temperature,
+    const callInteraction = async (modelName) => {
+      const interactionParams = {
+        model: modelName,
+        input,
       };
 
       if (systemInstruction && systemInstruction.trim()) {
-        config.systemInstruction = systemInstruction;
+        interactionParams.system_instruction = systemInstruction;
       }
 
-      const response = await this.ai.models.generateContent({
-        model: targetModel,
-        contents,
-        config,
-      });
+      if (temperature !== undefined) {
+        interactionParams.generation_config = {
+          temperature,
+        };
+      }
 
-      const reply = response.text || (response.candidates?.[0]?.content?.parts?.[0]?.text) || '';
-      
-      const usageMetadata = response.usageMetadata;
+      return await this.ai.interactions.create(interactionParams);
+    };
+
+    try {
+      let interaction;
+      let usedModel = targetModel;
+
+      try {
+        interaction = await callInteraction(targetModel);
+      } catch (err) {
+        // If preferred model is 503 overloaded, fall back gracefully to gemini-3.5-flash-lite
+        if ((err.status === 503 || err.message?.includes('503') || err.message?.includes('high demand')) && targetModel !== 'gemini-3.5-flash-lite') {
+          console.warn(`[GeminiProvider] ${targetModel} experiencing high demand, falling back to gemini-3.5-flash-lite...`);
+          usedModel = 'gemini-3.5-flash-lite';
+          interaction = await callInteraction('gemini-3.5-flash-lite');
+        } else {
+          throw err;
+        }
+      }
+
+      const reply = interaction.output_text || '';
+      const usageMetadata = interaction.usage;
       const usage = usageMetadata ? {
-        promptTokens: usageMetadata.promptTokenCount,
-        responseTokens: usageMetadata.candidatesTokenCount,
-        totalTokens: usageMetadata.totalTokenCount,
+        promptTokens: usageMetadata.total_input_tokens || usageMetadata.promptTokenCount,
+        responseTokens: usageMetadata.total_output_tokens || usageMetadata.candidatesTokenCount,
+        totalTokens: usageMetadata.total_tokens || usageMetadata.totalTokenCount,
       } : null;
 
       return {
         reply,
         usage,
-        model: targetModel,
+        model: usedModel,
         provider: 'gemini',
+        interactionId: interaction.id,
       };
     } catch (err) {
       throw this._handleError(err);
@@ -85,15 +104,14 @@ export class GeminiProvider {
    * @param {string} [model]
    */
   async summarizeHistory(olderMessages, currentSummary = '', model) {
-    const targetModel = model || this.defaultModel;
+    const targetModel = model || 'gemini-3.5-flash-lite';
 
     const formattedTranscript = olderMessages
       .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
       .join('\n\n');
 
     const prompt = currentSummary && currentSummary.trim()
-      ? `You are an expert conversation summarizer for a chatbot context manager.
-Existing summary of earlier conversation:
+      ? `Existing summary of earlier conversation:
 """
 ${currentSummary}
 """
@@ -104,8 +122,7 @@ ${formattedTranscript}
 """
 
 Task: Update the summary to incorporate the new turns into a single coherent, concise synopsis (maximum 150-200 words). Retain key facts, user preferences, technical requirements, decisions made, and unresolved questions. Avoid meta-commentary.`
-      : `You are an expert conversation summarizer for a chatbot context manager.
-Conversation transcript to condense:
+      : `Conversation transcript to condense:
 """
 ${formattedTranscript}
 """
@@ -113,15 +130,16 @@ ${formattedTranscript}
 Task: Create a concise, structured synopsis of this conversation (maximum 150-200 words). Capture the essential topics discussed, user goals, key details provided, and current context. Do not include filler words.`;
 
     try {
-      const response = await this.ai.models.generateContent({
+      const interaction = await this.ai.interactions.create({
         model: targetModel,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        config: {
+        input: prompt,
+        system_instruction: 'You are an expert conversation summarizer for a chatbot context manager.',
+        generation_config: {
           temperature: 0.3,
         },
       });
 
-      return (response.text || '').trim();
+      return (interaction.output_text || '').trim();
     } catch (err) {
       console.error('[GeminiProvider] Summarization request failed:', err.message);
       throw this._handleError(err);
@@ -143,8 +161,8 @@ Task: Create a concise, structured synopsis of this conversation (maximum 150-20
       return new Error('Gemini API rate limit exceeded. Please wait a moment and try again, or check your quota on Google AI Studio.');
     }
 
-    if (status === 503 || message.includes('Unavailable') || message.includes('overloaded')) {
-      return new Error('The Gemini model is temporarily overloaded or unavailable. Please retry in a few seconds.');
+    if (status === 503 || message.includes('503') || message.includes('Unavailable') || message.includes('high demand') || message.includes('overloaded')) {
+      return new Error('The Gemini model is temporarily overloaded. Please retry in a few seconds.');
     }
 
     if (error.name === 'AbortError' || message.includes('timeout')) {

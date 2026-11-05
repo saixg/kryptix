@@ -142,3 +142,4 @@ Task: Create a concise, structured synopsis of this conversation (maximum 150-20
     return new Error(`OpenAI API Error: ${message}`);
   }
 }
+

@@ -172,3 +172,4 @@ The system intercepts and translates common LLM API failure modes into clear, ac
 | `429` | Rate Limit / Quota Exceeded | Recommends waiting briefly and checking quota usage. |
 | `503 / 500` | Model Overloaded / Unavailable | Suggests retrying in a few seconds. |
 | `Timeout / Abort` | Network Connection Issue | Advises checking internet connection without crashing the app. |
+
