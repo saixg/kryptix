@@ -13,9 +13,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middleware
+// Middleware - allow larger payload for base64 image/file uploads (up to 25MB)
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 app.use(express.static(path.resolve(__dirname, '../public')));
 
 // Initialize ContextManager
@@ -70,13 +71,28 @@ app.get('/api/personas', (req, res) => {
 });
 
 /**
- * Send user message and get response with multi-turn context management
+ * List all saved conversation sessions
+ */
+app.get('/api/conversations', (req, res) => {
+  const sessions = contextManager.listSessions();
+  res.json({ sessions });
+});
+
+/**
+ * Send user message and get response with multi-turn context management & attachments
  */
 app.post('/api/chat', async (req, res) => {
-  const { message, conversationId, personaId, strategy, provider: preferredProvider } = req.body;
+  const {
+    message,
+    conversationId,
+    personaId,
+    strategy,
+    provider: preferredProvider,
+    attachments,
+  } = req.body;
 
-  if (!message || !message.trim()) {
-    return res.status(400).json({ error: 'Message cannot be empty.' });
+  if ((!message || !message.trim()) && (!attachments || !attachments.length)) {
+    return res.status(400).json({ error: 'Message or attachment cannot be empty.' });
   }
 
   // Verify provider setup
@@ -84,7 +100,7 @@ app.post('/api/chat', async (req, res) => {
   if (providerConfig.error && preferredProvider !== 'demo') {
     return res.status(503).json({
       error: providerConfig.error,
-      hint: 'Please create a .env file with your GEMINI_API_KEY or OPENAI_API_KEY.',
+      hint: 'Please set your GEMINI_API_KEY in the .env file.',
     });
   }
 
@@ -97,8 +113,8 @@ app.post('/api/chat', async (req, res) => {
 
     contextManager.lastUsedProvider = preferredProvider;
 
-    // 1. Add incoming user message to session memory
-    contextManager.addMessage(session.id, 'user', message.trim());
+    // 1. Add incoming user message + attachments to session memory
+    contextManager.addMessage(session.id, 'user', (message || '').trim(), attachments || []);
 
     // 2. Build context window (applies sliding window / progressive summarization)
     const contextResult = await contextManager.buildContext(session.id);
@@ -156,6 +172,26 @@ app.get('/api/conversations/:id', (req, res) => {
 });
 
 /**
+ * Update conversation title
+ */
+app.patch('/api/conversations/:id', (req, res) => {
+  const { title } = req.body;
+  if (!title) return res.status(400).json({ error: 'Title required.' });
+  const success = contextManager.updateTitle(req.params.id, title);
+  if (!success) return res.status(404).json({ error: 'Conversation not found.' });
+  res.json({ success: true });
+});
+
+/**
+ * Delete conversation session
+ */
+app.delete('/api/conversations/:id', (req, res) => {
+  const success = contextManager.deleteSession(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Conversation not found.' });
+  res.json({ success: true });
+});
+
+/**
  * Reset conversation history
  */
 app.post('/api/conversations/:id/reset', (req, res) => {
@@ -170,8 +206,7 @@ app.post('/api/conversations/:id/reset', (req, res) => {
 const PORT = config.port;
 app.listen(PORT, () => {
   console.log(`\n======================================================`);
-  console.log(`🚀 LLM Chatbot Server running on http://localhost:${PORT}`);
-  console.log(`📡 Strategy: ${config.contextStrategy} (Max active turns: ${config.maxActiveMessages})`);
+  console.log(`🚀 ROGUE Chatbot Server running on http://localhost:${PORT}`);
+  console.log(`📡 Model: ${config.geminiModel} | Strategy: ${config.contextStrategy}`);
   console.log(`======================================================\n`);
 });
-

@@ -16,22 +16,52 @@ export class GeminiProvider {
   }
 
   /**
-   * Format message array into clear turn transcript for the Interactions API
+   * Format message array into clear input for the Interactions API (supporting text & image attachments).
    */
   _formatInput(messages) {
-    return messages
+    const images = [];
+
+    const textTranscript = messages
       .map(msg => {
         const speaker = (msg.role === 'assistant' || msg.role === 'model') ? 'Assistant' : 'User';
-        return `${speaker}: ${msg.content}`;
+        let text = `${speaker}: ${msg.content || ''}`;
+
+        if (msg.attachments && msg.attachments.length) {
+          msg.attachments.forEach(att => {
+            if (att.type && att.type.startsWith('image/') && att.data) {
+              // Strip data:image/...;base64, prefix if present
+              const cleanBase64 = att.data.replace(/^data:image\/[a-z]+;base64,/, '');
+              images.push({
+                type: 'image',
+                data: cleanBase64,
+                mime_type: att.type,
+              });
+              text += `\n[Image Attached: ${att.name || 'image'}]`;
+            } else if (att.text) {
+              text += `\n[Attached File: ${att.name || 'document'}]\n\`\`\`\n${att.text}\n\`\`\``;
+            }
+          });
+        }
+
+        return text;
       })
       .join('\n\n');
+
+    if (images.length > 0) {
+      return [
+        { type: 'text', text: textTranscript },
+        ...images,
+      ];
+    }
+
+    return textTranscript;
   }
 
   /**
    * Generate a chat response for multi-turn history using the Google Gemini Interactions API.
    * 
    * @param {Object} params
-   * @param {Array<{ role: string, content: string }>} params.messages
+   * @param {Array<{ role: string, content: string, attachments?: Array<any> }>} params.messages
    * @param {string} [params.systemInstruction]
    * @param {string} [params.model]
    * @param {number} [params.temperature=0.7]

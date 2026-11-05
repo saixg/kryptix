@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 
 /**
- * ContextManager handles multi-turn conversation memory and context window optimization.
+ * ContextManager handles multi-turn conversation memory, session listing, and context window optimization.
  * 
  * Implemented Strategies:
  * 1. 'sliding_window': Keeps only the latest N messages, discarding older history.
@@ -20,7 +20,7 @@ export class ContextManager {
     this.defaultStrategy = defaultStrategy;
     this.summarizerFn = summarizerFn;
     
-    /** @type {Map<string, ConversationSession>} */
+    /** @type {Map<string, Object>} */
     this.sessions = new Map();
   }
 
@@ -36,7 +36,7 @@ export class ContextManager {
    * Retrieve or create a session by ID
    * @param {string} [conversationId] 
    * @param {Object} [options]
-   * @returns {ConversationSession}
+   * @returns {Object}
    */
   getOrCreateSession(conversationId, options = {}) {
     const id = conversationId || crypto.randomUUID();
@@ -44,6 +44,7 @@ export class ContextManager {
     if (!this.sessions.has(id)) {
       this.sessions.set(id, {
         id,
+        title: options.title || 'New Mission',
         messages: [],
         summary: '',
         lastSummarizedIndex: 0,
@@ -57,6 +58,7 @@ export class ContextManager {
     const session = this.sessions.get(id);
     if (options.strategy) session.strategy = options.strategy;
     if (options.personaId) session.personaId = options.personaId;
+    if (options.title) session.title = options.title;
     session.lastActiveAt = Date.now();
     return session;
   }
@@ -66,12 +68,21 @@ export class ContextManager {
    * @param {string} conversationId 
    * @param {'user'|'model'} role 
    * @param {string} content 
+   * @param {Array<Object>} [attachments=[]]
    */
-  addMessage(conversationId, role, content) {
+  addMessage(conversationId, role, content, attachments = []) {
     const session = this.getOrCreateSession(conversationId);
+    
+    // Auto-title on first user message if default
+    if (role === 'user' && (!session.title || session.title === 'New Mission' || session.title === 'New Chat')) {
+      const cleanTitle = content.replace(/\s+/g, ' ').trim().slice(0, 38);
+      session.title = cleanTitle ? (cleanTitle + (content.length > 38 ? '...' : '')) : 'Chat Session';
+    }
+
     session.messages.push({
       role,
       content,
+      attachments: attachments || [],
       timestamp: Date.now(),
     });
     session.lastActiveAt = Date.now();
@@ -84,12 +95,14 @@ export class ContextManager {
    * 
    * @param {string} conversationId 
    * @returns {Promise<{
-   *   messagesToSend: Array<{ role: 'user'|'model', content: string }>,
+   *   messagesToSend: Array<{ role: 'user'|'model', content: string, attachments?: Array<any> }>,
    *   summary: string,
    *   strategy: string,
    *   totalStoredMessages: number,
    *   activeMessagesCount: number,
-   *   truncatedCount: number
+   *   truncatedCount: number,
+   *   estimatedTokens: number,
+   *   contextPercent: number
    * }>}
    */
   async buildContext(conversationId) {
@@ -97,15 +110,38 @@ export class ContextManager {
     const totalMessages = session.messages.length;
     const strategy = session.strategy || this.defaultStrategy;
 
+    // Estimate tokens across all stored messages (~4 chars per token)
+    let totalTextChars = 0;
+    session.messages.forEach(m => {
+      totalTextChars += (m.content || '').length;
+      if (m.attachments) {
+        m.attachments.forEach(a => {
+          totalTextChars += (a.name || '').length + (a.text || '').length;
+        });
+      }
+    });
+    totalTextChars += (session.summary || '').length;
+    const estimatedTokens = Math.max(1, Math.round(totalTextChars / 4));
+    
+    // Theoretical limit for context gauge visualization (e.g. 10,000 threshold for compaction)
+    const contextLimit = this.maxActiveMessages * 600;
+    const contextPercent = Math.min(100, Math.round((estimatedTokens / contextLimit) * 100));
+
     // If within limits, send raw conversation
     if (totalMessages <= this.maxActiveMessages) {
       return {
-        messagesToSend: session.messages.map(m => ({ role: m.role, content: m.content })),
+        messagesToSend: session.messages.map(m => ({
+          role: m.role,
+          content: m.content,
+          attachments: m.attachments,
+        })),
         summary: session.summary,
         strategy,
         totalStoredMessages: totalMessages,
         activeMessagesCount: totalMessages,
         truncatedCount: 0,
+        estimatedTokens,
+        contextPercent,
       };
     }
 
@@ -116,12 +152,18 @@ export class ContextManager {
 
     if (strategy === 'sliding_window') {
       return {
-        messagesToSend: recentMessages.map(m => ({ role: m.role, content: m.content })),
+        messagesToSend: recentMessages.map(m => ({
+          role: m.role,
+          content: m.content,
+          attachments: m.attachments,
+        })),
         summary: '',
         strategy: 'sliding_window',
         totalStoredMessages: totalMessages,
         activeMessagesCount: recentMessages.length,
         truncatedCount: olderMessages.length,
+        estimatedTokens,
+        contextPercent,
       };
     }
 
@@ -146,11 +188,11 @@ export class ContextManager {
     if (session.summary && session.summary.trim()) {
       messagesToSend.push({
         role: 'user',
-        content: `[System Note: Summary of earlier conversation history]\n${session.summary}\n[End of earlier summary - continue conversation below]`
+        content: `[System Note: Summary of earlier conversation history]\n${session.summary}\n[End of earlier summary - continue conversation below]`,
       });
       messagesToSend.push({
         role: 'model',
-        content: `Understood. I have integrated our previous discussion into memory and am ready to proceed.`
+        content: `Understood. I have integrated our previous discussion into memory and am ready to proceed.`,
       });
     }
 
@@ -159,6 +201,7 @@ export class ContextManager {
       messagesToSend.push({
         role: msg.role,
         content: msg.content,
+        attachments: msg.attachments,
       });
     }
 
@@ -169,6 +212,8 @@ export class ContextManager {
       totalStoredMessages: totalMessages,
       activeMessagesCount: recentMessages.length,
       truncatedCount: olderMessages.length,
+      estimatedTokens,
+      contextPercent,
     };
   }
 
@@ -181,6 +226,7 @@ export class ContextManager {
       const existing = this.sessions.get(conversationId);
       this.sessions.set(conversationId, {
         id: conversationId,
+        title: existing.title || 'New Mission',
         messages: [],
         summary: '',
         lastSummarizedIndex: 0,
@@ -195,6 +241,46 @@ export class ContextManager {
   }
 
   /**
+   * Delete a session
+   * @param {string} conversationId 
+   */
+  deleteSession(conversationId) {
+    return this.sessions.delete(conversationId);
+  }
+
+  /**
+   * Update session title
+   * @param {string} conversationId 
+   * @param {string} title 
+   */
+  updateTitle(conversationId, title) {
+    const session = this.sessions.get(conversationId);
+    if (session) {
+      session.title = title;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * List all conversation sessions sorted by recent activity
+   */
+  listSessions() {
+    return Array.from(this.sessions.values())
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)
+      .map(s => ({
+        id: s.id,
+        title: s.title || 'New Mission',
+        messageCount: s.messages.length,
+        strategy: s.strategy,
+        personaId: s.personaId,
+        createdAt: s.createdAt,
+        lastActiveAt: s.lastActiveAt,
+        lastMessageSnippet: s.messages.length ? s.messages[s.messages.length - 1].content.slice(0, 60) : '',
+      }));
+  }
+
+  /**
    * Get metadata and debugging stats for a session
    * @param {string} conversationId 
    */
@@ -206,8 +292,16 @@ export class ContextManager {
     const active = Math.min(total, this.maxActiveMessages);
     const older = Math.max(0, total - this.maxActiveMessages);
 
+    let totalChars = 0;
+    session.messages.forEach(m => { totalChars += (m.content || '').length; });
+    totalChars += (session.summary || '').length;
+    const estimatedTokens = Math.max(1, Math.round(totalChars / 4));
+    const contextLimit = this.maxActiveMessages * 600;
+    const contextPercent = Math.min(100, Math.round((estimatedTokens / contextLimit) * 100));
+
     return {
       id: session.id,
+      title: session.title,
       personaId: session.personaId,
       strategy: session.strategy,
       totalMessages: total,
@@ -215,9 +309,10 @@ export class ContextManager {
       olderMessages: older,
       hasSummary: Boolean(session.summary),
       summary: session.summary,
+      estimatedTokens,
+      contextPercent,
       createdAt: session.createdAt,
       lastActiveAt: session.lastActiveAt,
     };
   }
 }
-
