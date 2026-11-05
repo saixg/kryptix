@@ -1,0 +1,24 @@
+# Environment secrets
+.env
+.env.local
+.env.*.local
+LLM-api/.env
+LLM-api/.env.local
+LLM-api/.env.*.local
+
+# Allow example files
+!.env.example
+!LLM-api/.env.example
+
+# Dependencies
+node_modules/
+LLM-api/node_modules/
+package-lock.json
+LLM-api/package-lock.json
+
+# OS / Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
