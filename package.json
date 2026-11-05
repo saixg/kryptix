@@ -1,0 +1,31 @@
+{
+  "name": "llm-context-chatbot",
+  "version": "1.0.0",
+  "description": "Multi-turn LLM Chatbot with Context Window Management (Google Gemini & OpenAI)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "cli": "node src/cli.js",
+    "test": "node test/contextManager.test.js",
+    "test-connection": "node scripts/test-connection.js"
+  },
+  "keywords": [
+    "llm",
+    "gemini",
+    "openai",
+    "chatbot",
+    "context-window",
+    "multi-turn"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "openai": "^7.51.0"
+  }
+}

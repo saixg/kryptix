@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Context-Aware LLM Chatbot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo-icon">✨</div>
+        <div class="brand-text">
+          <h1>NexusChat</h1>
+          <span class="badge" id="provider-badge">Connecting...</span>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="control-group">
+          <label for="persona-select">Persona:</label>
+          <select id="persona-select">
+            <option value="aria">Aria (Systems Architect)</option>
+            <option value="socratic">Socrates (Philosopher)</option>
+            <option value="concise">Byte (Minimalist)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="strategy-select">Context Strategy:</label>
+          <select id="strategy-select">
+            <option value="summarize">Rolling Summary + Window</option>
+            <option value="sliding_window">Sliding Window (Truncate)</option>
+          </select>
+        </div>
+
+        <button id="toggle-inspector-btn" class="secondary-btn" title="Toggle Context Inspector">
+          🔍 Inspect Context
+        </button>
+
+        <button id="reset-btn" class="danger-btn" title="Reset this conversation">
+          🔄 Reset Memory
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace: Chat + Context Inspector Drawer -->
+    <main class="main-workspace">
+      
+      <!-- Chat Interface -->
+      <section class="chat-section">
+        <div id="api-alert" class="api-alert hidden">
+          <div class="alert-content">
+            <span class="alert-icon">⚠️</span>
+            <div id="alert-message">API Key missing or invalid. Check your .env file.</div>
+          </div>
+        </div>
+
+        <div class="messages-container" id="messages-container">
+          <!-- Initial welcome card -->
+          <div class="welcome-card" id="welcome-card">
+            <div class="welcome-avatar">🤖</div>
+            <h2>Welcome to your Context-Managed LLM Chatbot</h2>
+            <p>This assistant remembers your previous conversation turns and intelligently compresses older context once the dialogue expands.</p>
+            
+            <div class="features-grid">
+              <div class="feature-item">
+                <span class="f-icon">🧠</span>
+                <div>
+                  <strong>Multi-Turn Memory</strong>
+                  <p>Remembers what was said earlier without losing train of thought.</p>
+                </div>
+              </div>
+              <div class="feature-item">
+                <span class="f-icon">⚡</span>
+                <div>
+                  <strong>Context Compaction</strong>
+                  <p>Summarizes older history so context limits are never breached.</p>
+                </div>
+              </div>
+              <div class="feature-item">
+                <span class="f-icon">🛡️</span>
+                <div>
+                  <strong>Robust Error Handling</strong>
+                  <p>Gracefully recovers from timeouts, rate limits, or network faults.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="prompt-suggestions">
+              <span>Try saying:</span>
+              <button class="chip" onclick="usePrompt('My name is Alex and I am architecting an event-driven payment system.')">
+                "My name is Alex and I am architecting an event-driven payment system."
+              </button>
+              <button class="chip" onclick="usePrompt('What are 3 trade-offs between Kafka and RabbitMQ?')">
+                "What are 3 trade-offs between Kafka and RabbitMQ?"
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="chat-input-area">
+          <form id="chat-form" class="chat-form">
+            <textarea
+              id="user-input"
+              rows="1"
+              placeholder="Type your message... (Shift+Enter for newline, Enter to send)"
+              autocomplete="off"
+            ></textarea>
+            <button type="submit" id="send-btn" class="send-btn" title="Send message">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+              </svg>
+            </button>
+          </form>
+          <div class="input-hint">Powered by Google Gemini / OpenAI SDK • Context Window: Auto-Compacting</div>
+        </footer>
+      </section>
+
+      <!-- Context Inspector Drawer -->
+      <aside class="context-inspector" id="context-inspector">
+        <div class="inspector-header">
+          <h3>Context Window Inspector</h3>
+          <button id="close-inspector-btn" class="icon-btn">&times;</button>
+        </div>
+
+        <div class="inspector-body">
+          <div class="metric-card">
+            <div class="metric-title">Conversation State</div>
+            <div class="metric-row">
+              <span>Total Stored Messages:</span>
+              <strong id="metric-total">0</strong>
+            </div>
+            <div class="metric-row">
+              <span>Active Window:</span>
+              <strong id="metric-active">0 / 6</strong>
+            </div>
+            <div class="metric-row">
+              <span>Summarized/Truncated:</span>
+              <strong id="metric-truncated">0</strong>
+            </div>
+            <div class="metric-row">
+              <span>Active Strategy:</span>
+              <strong id="metric-strategy">summarize</strong>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="section-title">
+              <span>📜 Rolling Memory Synopsis</span>
+              <span class="badge-mini" id="summary-status">Empty</span>
+            </div>
+            <p class="section-desc">Older messages outside the sliding window are condensed here by the LLM and prepended to your prompt.</p>
+            <div class="summary-box" id="summary-box">
+              <em>No messages summarized yet. Conversation is within active window.</em>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="section-title">
+              <span>🔍 What The Model Sees</span>
+            </div>
+            <p class="section-desc">The precise prompt assembly currently sent to the model.</p>
+            <div class="context-preview" id="context-preview">
+              <em>Send messages to observe active context generation.</em>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
