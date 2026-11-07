@@ -1,4 +1,4 @@
-# Kryptix — Multi-Turn LLM Platform with Context Window Management
+# Kryptix — Multi-Turn LLM Platform with testing playground (under dev)
 
 > **Internship Assignment Submission**  
 > **Project**: Context-Managed Multi-Turn Conversational AI Platform (**ROGUE**)  
